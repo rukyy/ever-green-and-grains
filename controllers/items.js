@@ -39,7 +39,7 @@ const postItem = async (req, res) => {
                 return res.status(404).json(error)
             })
     }
-    console.log(secureUrls)
+
     const newItem = {
         name: req.body.file[0],
         description: req.body.file[1],
