@@ -2,7 +2,8 @@ require("dotenv").config()
 const express = require("express")
 const cors = require("cors")
 const mongoose = require("mongoose")
-const itemRoutes = require("./routes/item-routes")
+const itemRoutes = require("./routes/item_routes")
+const authRoutes = require("./routes/user_authentication_route")
 const bodyParser = require("body-parser")
 
 
@@ -20,6 +21,7 @@ app.use((req, res, next) => {
 })
 
 app.use("/item",itemRoutes)
+app.use("/auth", authRoutes)
 
 mongoose.connect(process.env.URI)
 .then(()=>{
