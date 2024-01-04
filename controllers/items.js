@@ -23,6 +23,22 @@ const getItems = async (req, res) => {
     res.status(200).json(items)
 }
 
+const getUserItems = async (req, res) =>{
+    try{
+        const userID=req.user._id   
+        console.log('user',userID);
+        const userItems = await itemDetails.find({ owner: userID }).sort({ createdAt: -1 });
+        if(userItems){
+            res.status(200).send(userItems)
+        }
+    }
+        catch{
+            throw new Error ('Error in getting the data')
+        }
+
+}
+
+
 const postItem = async (req, res) => {
     const secureUrls = []
     for (i = 0; i < req.files.length; i++) {
