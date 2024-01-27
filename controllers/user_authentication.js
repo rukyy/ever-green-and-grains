@@ -4,9 +4,13 @@ const { getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  reauthenticateWithCredential,
+  deleteUser
 } = require("firebase/auth")
+const jwt = require("jsonwebtoken")
 const userDetails = require("../db_model/user_model");
+const { json } = require("body-parser");
 
 
 
@@ -28,6 +32,21 @@ const firebaseapp = initializeApp(firebaseConfig)
 const auth = getAuth(firebaseapp)
 
 
+const genToken = (_id) => {
+  return jwt.sign({ _id }, process.env.JWT_SECRET)
+}
+
+const signUp = async (req, res) => {
+  const { firstname, lastname, email, phone, password, cart } = req.body
+  try {
+    const userDet = await userDetails.signup(email, password, firstname, lastname, phone, cart)
+    const token = genToken(userDet._id)
+    return res.status(200).json({ email, token })
+  } catch (error) {
+    res.status(400).json({ error: error.message })
+  }
+}
+
 // get authentication status from firebase
 const authStatus = async (req, res) => {
   try {
@@ -37,7 +56,7 @@ const authStatus = async (req, res) => {
     })
   } catch (error) {
     console.log(error)
-    return res.status(400).json({'mssg':error})
+    return res.status(400).json({ 'mssg': error })
   }
 
 }
@@ -45,7 +64,6 @@ const authStatus = async (req, res) => {
 // Logout function
 const logOut = async (req, res) => {
   try {
-    await signOut(auth);
     return res.status(200).json({ "mssg": "done" })
   } catch (err) {
     console.log(err)
@@ -53,104 +71,99 @@ const logOut = async (req, res) => {
   }
 }
 
-// get user info from mongodb using users email
-const getUserItems =async (email)=>{
-  const userRef =await userDetails.find({"email":email});
-  if(!userRef){
-    return {"error":"Not Found"}
-  }
 
-  return userRef[0]
-}
 
 // this function is to login in the user with firebase 
-const LoginUser = async (req, res) => {
+const signIn = async (req, res) => {
   try {
     let email = req.body.email;
     let password = req.body.password;
-    let cart = req.body.cart 
-
+    let cart = req.body.cart
 
     if (!email || !password) {
-      return res.status(400).send({ message: "Please provide all the details." });
+      return res.status(400).json({ mssg: "please fill all fields" })
     } else {
       const newarr = []
-      // get credentials from firebsae auth
-      await signInWithEmailAndPassword(auth, email, password)
-        .then(async (credential) => {
-          const mongoUsercred =await getUserItems(email)
-          const cartItems = mongoUsercred["cart"]
-          // spread out the users cart and the saved cart on the browser to check and remove duplicates
-          if(cart && cartItems){
-            [...cart, ...cartItems].filter((item)=>{
-              const isDuplicate = newarr.some(obj => {
-                if(obj.itemID === item.itemID){
-                  return obj.itemID === item.itemID
-                }
-              })
-              if(!isDuplicate){
-                newarr.push(item)
-              }
-            })
+      const credentials = await userDetails.signin(email, password)
+      if (!credentials) {
+        return res.status(400).json()
+      }
+      const detail = {
+        firstname: credentials["firstname"],
+        lastname: credentials["lastname"],
+        email :credentials["email"]
+      }
+      const token = genToken(credentials._id)
+      // cart items attached to user
+      const cartItems = credentials["cart"]
+      // spread out the users cart and the saved cart in L_storage to check nd remove duplicates
+      if (cart && cartItems) {
+        [...cart, ...cartItems].filter((item) => {
+          const isDuplicate = newarr.some(obj => {
+            if (obj.itemID === item.itemID) {
+              return obj.itemID === item.itemID
+            }
+          })
+          if (!isDuplicate) {
+            newarr.push(item)
           }
-          
-          return res.status(200).json({ ...credential, newarr,firstname:mongoUsercred["firstname"],lastname:mongoUsercred["lastname"], phone:mongoUsercred["phone"] })
         })
-        .catch((error) => {
-          console.log(error["code"]);
-          return res.status(400).send({ message: error["code"] })
-        });
-    };
-  } catch (err) {
-    res.status(500).json({ error: err.toString() });
+      }
+      return res.status(200).json({ detail, newarr, token })
+    }
+
+  } catch (error) {
+    return res.status(400).json({ error: error.message })
   }
 }
 
-
-// get userdetails from mongodb(as a route) and return as a response
-const getUserDetails =async (req, res) =>{
-  const {email} = req.params
-  const info = await getUserItems(email)
-  if(!info){
-    return res.status(404).json({message:"No user found with this email"})
+const getUserDetails =async (req, res)=>{
+  const email = req.params
+  console.log(email.email)
+  const user = await userDetails.findOne({"email":email.email})
+  if(!user){
+    return res.status(401).json({message:"No User Found!"});
   }
+  return res.status(200).json({  firstname: user.firstname,
+  lastname: user.lastname,
+  email: user.email,   
+  phone: user.phone,
+  address: user.address
+})
+}
+
+const updateAddress = async (req, res) => {
+  const { land, address, email } = req.body;
+  console.log(land, address)
+  const info = await userDetails.updateOne({ "email": email }, { $set: { "address": { land, address } } })
+  if (!info) {
+    return res.status(400).json({ "error": "sorry could not update" })
+  }
+  console.log(info)
   return res.status(200).json(info)
 }
 
-const createUser = async (req, res) => {
-  try {
-    const { firstname, lastname, email, phone, password, cart } = req.body
-    if (!email || !password) {
-      return res.status(400).send({ message: "please enter a valid email and password" })
-    }
-    await createUserWithEmailAndPassword(auth, email, password)
-      .then(async (result) => {
-        const details = { firstname, lastname, email, phone, userID: result["user"]["uid"], cart }
-        const post = await userDetails.create(details)
-        if (!post) {
-          return res.status(404).json({ "error": "please try again" })
-        }
-        return res.status(200).json(post)
-      }).catch((e) => {
-        console.log(e)
-        return res.status(404).json(e)
-      })
-
-  } catch (e) {
-    res.status(500).json({ error: e.toString() })
+// delete user from firebase and mongodb 
+const delUser = async (req, res) => {
+  try{
+    const { email } = req.body
+    console.log("DELETE: ", email )
+    const confirmation = userDetails.deleteUser(email)
+    res.status(200).json({confirmation:"success"})
+  }catch(error){
+    return res.status(500).json(error)
   }
-
-
+  //get the userdet from mongodb
 }
 
-
-
 module.exports = {
-  createUser,
-  LoginUser,
+  signUp,
+  signIn,
   logOut,
   authStatus,
-  getUserDetails
+  getUserDetails,
+  updateAddress,
+  delUser
 }
 
 
